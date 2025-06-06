@@ -91,4 +91,4 @@ This work builds upon:
 
 ## Acknowledgements 
 
-This project was developed as a senior thesis at Yale University. Thanks to Dr. Hemant Tagare for continuous guidance and supervision, the Yale S&DS department for academic support, PPMI and Verily Life Sciences for providing the dataset, and my aunt--whose courage while living with PD drove this research. 
+This project was developed as a senior thesis at Yale University. Thanks to Dr. Hemant Tagare for continuous guidance and supervision, the Yale S&DS department for academic support, PPMI and Verily Life Sciences for providing the dataset, and my aunt—whose courage while living with PD drove this research. 
