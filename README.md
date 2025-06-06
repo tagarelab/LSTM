@@ -6,19 +6,18 @@
 **Completion Date**: April 30, 2025 
 
 ## Abstract 
-This repository contains the implementation of a novel progression index for Parkinson's disease (PD) monitoring using wearable sensor data and 
-Long Short-Term Memory (LSTM) neural networks. The model transforms daily physical activity patterns from ambulatory data into a
-meaningful disease progression metric, demonstrating consistent visual separation between PD patients and healthy controls across cross-validation splits.
+This repository contains the implementation of a novel progression index for Parkinson's disease (PD) monitoring using wearable sensor data and Long Short-Term Memory (LSTM) neural networks. The model transforms daily physical activity patterns from ambulatory data into a meaningful disease progression metric, demonstrating consistent visual separation between PD patients and healthy controls across cross-validation splits.
 
 ## Contents 
 1. [Project Overview](#Project-Overview)
-2. [Repo Structure](##Repo-Structure)
-3. [Quick Start](##Quick-Start)
+2. [Repo Structure](#Repo-Structure)
+3. [Quick Start](#Quick-Start)
+4. [References and Related Work](#References-and-Related-Work)
+5. [Future Directions](#Future-Directions)
+6. [Acknowledgements](#Acknowledgements)
 
 ## Project Overview 
-Parkinson's disease affects over 10 million people worldwide as the most common age-related motor disorder. Current clinical assessments using the 
-Movement Disorder Society-Unified Parkinson's Disease Rating Scale (MDS-UPDRS) have limitations including subjectivity and accessibility constraints. 
-This project addresses these challenges by:
+Parkinson's disease affects over 10 million people worldwide as the most common age-related motor disorder. Current clinical assessments using the Movement Disorder Society-Unified Parkinson's Disease Rating Scale (MDS-UPDRS) have limitations including subjectivity and accessibility constraints. This project addresses these challenges by:
 
 - Developing an objective, continuous monitoring approach using wearable sensor data
 - Leveraging LSTM networks to capture temporal dependencies in activity patterns
@@ -56,3 +55,40 @@ This project addresses these challenges by:
 └── README.md                      # This file
 ```
 ## Quick Start 
+
+#### Prerequisites 
+
+- Python 3.8+
+- R 4.0+ (for data preprocessing)
+- Required Python packages (see `src/requirements.txt`) 
+
+#### Installation 
+
+- Clone the repo
+- Install Python dependencies
+- Install R dependencies
+
+#### Running the Analysis 
+- Option 1: Use the main Python script
+- Option 2: Use the Jupyter notebook
+- The analysis will generate visualization plots, results summary, and log files for debugging
+
+## References and Related Work 
+
+This work builds upon: 
+
+1. **Verily Life Sciences Study** (Chen et al., 2023): Digital biomarkers detected treatment effects earlier and with smaller sample sizes than traditional clinical assessments in Lewy Body Dementia patients.
+2. **PPMI Database**: Longitudinal study providing wearable sensor data from PD patients and healthy controls.
+3. **LSTM Networks**: Effective for capturing long-term temporal dependencies in time series data.
+
+## Future Directions 
+
+1. **Enhanced Loss Function**: Incorporate elements like the UPDRS score and medication information, as well as other data captured by the Verily watch
+2. **Missing Data Handling**: Implement masking for real-world adherence patterns
+3. **Data Smoothing**: Reduce noise while preserving underlying patterns; investigate imputation alternatives
+4. **Validation-Based Training**: Replace convergence-based stopping with validation metrics
+5. **Multi-Scale Analysis**: Explore different temporal scales beyond weekly aggregation
+
+## Acknowledgements 
+
+This project was developed as a senior thesis at Yale University. Thanks to Dr. Hemant Tagare for continuous guidance and supervision, the Yale S&DS department for academic support, PPMI and Verily Life Sciences for providing the dataset, and my aunt--whose courage while living with PD drove this research. 
