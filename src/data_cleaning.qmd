@@ -1,0 +1,288 @@
+---
+title: "PPMI Wearable Data Preprocessing"
+author: "Felice Dong"
+format: html
+editor: visual
+warning: false
+message: false
+---
+
+## Overview
+
+This Quarto document preprocesses ambulatory activity data from the Parkinson's Progression Markers Intiative (PPMI) for subsequent analysis using LSTMs. The preprocessing pipeline transforms raw hourly wearable sensor data into weekly aggregated features, which are then saved in a format suitable for machine learning tasks.
+
+## Libraries
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(VIM)
+
+options(dplyr.summarise.inform = FALSE) # Suppress summarise warnings
+```
+
+## Load Data
+
+```{r}
+# Load raw ambulatory data 
+ambulatory_data <- read_csv("Rawdata.csv")
+
+# Load cohort information 
+cohort_data <- read_csv("Cohort.csv")
+
+# Load demographics for date calculation
+demographics <- read_csv("Demographics.csv")
+
+cat("Initial data dimensions:", dim(ambulatory_data), "\n")
+cat("Number of unique subjects:", length(unique(ambulatory_data$Subject)), "\n")
+```
+
+## Initial Preprocessing
+
+```{r}
+# Convert age from seconds to days for interpretability 
+ambulatory_data <- ambulatory_data %>%
+  mutate(age_days = round(age_seconds / 86400, 0)) %>%
+  arrange(subject, age_days) %>%
+  select(-age_seconds) 
+
+# Join with cohort information 
+ambulatory_data <- ambulatory_data %>%
+  left_join(cohort_data, by = c("subject" = "PATNO")) %>%
+  filter(!is.na(COHORT)) %>%  # Remove subjects without cohort information
+  select(-APPRDX)
+
+# Clearer labels 
+ambulatory_data <- ambulatory_data %>%
+  mutate(
+    COHORT = factor(COHORT, 
+                   levels = c(1, 2, 3, 4, 9),
+                   labels = c("PD", "Control", "SWEDD", 
+                              "Prodromal", "Early_Imaging"))
+  )
+
+cat("Cohort distribution:\n")
+table(ambulatory_data$COHORT)
+```
+
+## Daily Activity Aggregation
+
+The raw data contains hourly measurements, which we aggregate here to daily totals while handling potential misalignments between the pseudo-age and reported day-of-week.
+
+```{r}
+daily_data <- ambulatory_data %>%
+  arrange(subject, age_days) %>%
+  group_by(subject) %>%
+  mutate(
+    # Calculate difference in age_days between consecutive observations
+    days_diff = age_days - lag(age_days, default = first(age_days)),
+    # Flag new days based on time_day changes or significant age gaps
+    new_day = case_when(
+      row_number() == 1 ~ TRUE,
+      time_day != lag(time_day) ~ TRUE,
+      abs(days_diff) > 2 ~ TRUE,
+      TRUE ~ FALSE
+    ),
+    # Create unique day identifier
+    day_id = cumsum(new_day)
+  ) %>%
+  ungroup() %>%
+  # Aggregate to daily level
+  group_by(subject, day_id) %>%
+  summarise(
+    walking_mins_day = sum(sum_walking_minutes, na.rm = TRUE),
+    time_day = first(time_day),
+    cohort = first(COHORT),
+    age_days = first(age_days),
+    .groups = 'drop'
+  ) %>%
+  select(-day_id)
+
+cat("Daily data dimensions:", dim(daily_data), "\n")
+```
+
+## Date Calculation
+
+We calculate the approximate date of each entry. The researchers have removed actual dates to protect patient privacy. However, we have the date of birth (month and year) for each subject, found as `dob` in the demographics data. We also have `age_days` for each subject in the ambulatory data. We can use this information and the relationship between the two to calculate the approximate date for walking data.
+
+```{r}
+# Process demographics for date calculation
+demographics <- demographics %>%
+  mutate(dob = as.Date(paste0(BIRTHDT, "/01"), format = "%m/%Y/%d"))
+
+# Calculate approximate dates and age in years
+daily_data <- daily_data %>%
+  left_join(demographics %>% select(PATNO, dob), 
+            by = c("subject" = "PATNO")) %>%
+  mutate(
+    approx_date = dob + age_days,
+    age_years = round(age_days / 365.25, 1)  # Account for leap years
+  ) %>%
+  select(-dob)
+```
+
+## Data Quality Filtering
+
+```{r}
+# Calculate study duration and compliance for each subject
+daily_data <- daily_data %>%
+  group_by(subject) %>%
+  mutate(
+    duration_days = max(age_days) - min(age_days) + 1,
+    compliance = n() / first(duration_days)
+  ) %>%
+  ungroup()
+
+# Apply quality filters
+initial_subjects <- length(unique(daily_data$subject))
+
+daily_data <- daily_data %>%
+  filter(
+    compliance >= 0.5,      # Minimum 50% compliance
+    duration_days >= 30     # Minimum 30 days of data
+  ) %>%
+  select(-duration_days, -compliance)
+
+final_subjects <- length(unique(daily_data$subject))
+
+cat("Subjects before filtering:", initial_subjects, "\n")
+cat("Subjects after filtering:", final_subjects, "\n")
+cat("Subjects removed:", initial_subjects - final_subjects, "\n")
+```
+
+## Weekly Data Preparation
+
+We now create a weekly structure based on ISO weeks, which will be used for LSTM input. Each week will be represented by the total walking minutes and the day of the week.
+
+```{r}
+# Create weekly structure based on ISO weeks
+weekly_data <- daily_data %>%
+  group_by(subject) %>%
+  arrange(subject, approx_date) %>%
+  mutate(
+    # Calculate days since Monday
+    days_since_monday = case_when(
+      time_day == "Mon" ~ 0, time_day == "Tue" ~ 1, time_day == "Wed" ~ 2,
+      time_day == "Thu" ~ 3, time_day == "Fri" ~ 4, time_day == "Sat" ~ 5,
+      time_day == "Sun" ~ 6
+    ),
+    # Calculate day differences
+    days_diff = as.numeric(approx_date - lag(approx_date, default = first(approx_date))),
+    # Identify new weeks
+    new_week = case_when(
+      row_number() == 1 ~ TRUE,                                    # First observation
+      days_diff >= 7 ~ TRUE,                                       # Week gap
+      days_since_monday < lag(days_since_monday) ~ TRUE,          # Week rollover
+      TRUE ~ FALSE
+    ),
+    # Create week identifier
+    week_id = cumsum(new_week)
+  ) %>%
+  ungroup() %>%
+  select(-days_since_monday, -days_diff, -new_week)
+```
+
+#### Quality Check and Cleanup
+
+```{r}
+# Check for weeks with more than 7 days 
+problematic_weeks <- weekly_data %>%
+  group_by(subject, week_id) %>%
+  summarise(n_days = n(), .groups = 'drop') %>%
+  filter(n_days > 7)
+
+if(nrow(problematic_weeks) > 0) {
+  cat("Found", nrow(problematic_weeks), "weeks with >7 days. Investigating...\n")
+  
+  # Remove specific problematic observation identified during analysis
+  weekly_data <- weekly_data %>%
+    filter(!(subject == 59174 & age_days == 23095))
+}
+```
+
+#### ISO Week Assignment
+
+```{r}
+# Assign ISO week labels for temporal consistency
+weekly_data <- weekly_data %>%
+  group_by(subject, week_id) %>%
+  mutate(
+    iso_year = isoyear(first(approx_date)),
+    week_id = paste0(iso_year, "-", 
+                     formatC(isoweek(first(approx_date)), width = 2, flag = "0"))
+  ) %>%
+  ungroup() %>%
+  select(-iso_year)
+```
+
+## Final Data Transformation
+
+```{r}
+# Transform to wide format with days as columns
+final_data <- weekly_data %>%
+  # Aggregate any duplicate day-week combinations
+  group_by(subject, week_id, time_day) %>%
+  summarise(walking_mins_day = sum(walking_mins_day, na.rm = TRUE), 
+            .groups = 'drop') %>%
+  # Pivot to wide format
+  pivot_wider(
+    names_from = time_day, 
+    values_from = walking_mins_day, 
+    values_fill = NA
+  ) %>%
+  # Ensure all weekdays are present and in correct order
+  select(subject, week_id, all_of(c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"))) %>%
+  # Extract year and week number
+  mutate(
+    year = as.numeric(substr(week_id, 1, 4)),
+    week_num = as.numeric(substr(week_id, 6, 7))
+  )
+
+# Add cohort information
+cohort_info <- weekly_data %>%
+  select(subject, week_id, cohort) %>%
+  distinct()
+
+final_data <- final_data %>%
+  left_join(cohort_info, by = c("subject", "week_id"))
+```
+
+## Data Summary
+
+```{r}
+cat("Final dataset summary:\n")
+cat("Dimensions:", dim(final_data), "\n")
+cat("Number of subjects:", length(unique(final_data$subject)), "\n")
+cat("Number of weeks:", nrow(final_data), "\n")
+
+cat("\nCohort distribution:\n")
+final_cohort_summary <- final_data %>%
+  group_by(cohort) %>%
+  summarise(
+    n_subjects = n_distinct(subject),
+    n_weeks = n(),
+    .groups = 'drop'
+  )
+print(final_cohort_summary)
+
+cat("\nMissing data summary:\n")
+missing_summary <- final_data %>%
+  select(Mon:Sun) %>%
+  summarise(across(everything(), ~sum(is.na(.))))
+print(missing_summary)
+```
+
+## Export
+
+```{r}
+# Export processed data
+write.csv(final_data, "Data_preimp.csv", row.names = FALSE)
+cat("Data exported to Data_preimp.csv\n")
+```
+
+## Notes
+
+-   Data Privacy: All dates are approximate, calculated from age data to protect patient privacy
+-   Missing Data: Missing days within weeks are preserved as NA for downstream interpolation
+-   Quality Filters: Applied minimum compliance (50%) and duration (30 days) thresholds
+-   Weekly Structure: Uses ISO week numbering for consistent temporal alignment
